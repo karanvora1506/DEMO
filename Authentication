@@ -1,0 +1,113 @@
+import React, { createContext, useContext, useState, useEffect } from 'react';
+import { initializeApp } from 'firebase/app';
+import { getAuth, onAuthStateChanged, signInWithCustomToken, signInAnonymously, signOut } from 'firebase/auth';
+
+// 1. Initialize Context
+const AuthContext = createContext();
+
+// Custom hook for consuming the authentication context
+export const useAuth = () => useContext(AuthContext);
+
+// Get mandatory environment variables
+const firebaseConfig = typeof __firebase_config !== 'undefined' ? JSON.parse(__firebase_config) : null;
+const initialAuthToken = typeof __initial_auth_token !== 'undefined' ? __initial_auth_token : null;
+
+// --- Authentication Provider Component ---
+const AuthProvider = ({ children }) => { // Removed 'export' keyword here
+    const [user, setUser] = useState(null); // Firebase user object
+    const [loading, setLoading] = useState(true); // Is the auth state currently loading/checking
+    const [auth, setAuth] = useState(null);
+
+    // 2. Initialization and Authentication Logic
+    useEffect(() => {
+        if (!firebaseConfig) {
+            console.error("Firebase configuration is missing.");
+            setLoading(false);
+            return;
+        }
+
+        try {
+            const app = initializeApp(firebaseConfig);
+            const authInstance = getAuth(app);
+            setAuth(authInstance);
+
+            // 3. Handle Canvas Authentication
+            const setupAuth = async () => {
+                if (initialAuthToken) {
+                    // Sign in using the custom token provided by the Canvas environment
+                    await signInWithCustomToken(authInstance, initialAuthToken);
+                } else {
+                    // Fallback to anonymous sign-in if no token is provided
+                    await signInAnonymously(authInstance);
+                }
+            };
+            
+            // 4. Listen for Auth State Changes
+            const unsubscribe = onAuthStateChanged(authInstance, (currentUser) => {
+                setUser(currentUser);
+                setLoading(false);
+                // After the initial setup, we stop loading
+            });
+
+            setupAuth().catch(error => {
+                console.error("Firebase Auth Setup Failed:", error);
+                setLoading(false);
+            });
+
+            return () => unsubscribe(); // Cleanup listener on component unmount
+
+        } catch (error) {
+            console.error("Firebase Initialization Error:", error);
+            setLoading(false);
+        }
+    }, []);
+
+
+    // 5. Login/Logout Functions
+    const logout = async () => {
+        if (auth) {
+            try {
+                await signOut(auth);
+                // Optionally sign in anonymously again after signing out
+                await signInAnonymously(auth); 
+                console.log("User signed out and signed back in anonymously.");
+            } catch (error) {
+                console.error("Logout Failed:", error);
+            }
+        }
+    };
+
+    // Placeholder for email/password login (replace with real login logic if needed)
+    const login = () => {
+        // In a real app, this would use signInWithEmailAndPassword or GoogleAuthProvider
+        // NOTE: Changed alert() to console.log/custom UI message for robustness
+        console.log("Login functionality is pending implementation. User is currently signed in via Canvas.");
+    };
+
+    const value = {
+        user,
+        loading,
+        logout,
+        login, // placeholder function
+        isAuthenticated: !!user && !user.isAnonymous, // check if a recognized user is logged in
+        userId: user ? user.uid : null,
+    };
+
+    return (
+        <AuthContext.Provider value={value}>
+            {loading ? <LoadingScreen /> : children}
+        </AuthContext.Provider>
+    );
+};
+
+// Simple Loading Screen
+const LoadingScreen = () => (
+    <div className="flex items-center justify-center min-h-screen bg-gray-50">
+        <div className="flex flex-col items-center p-6 bg-white rounded-lg shadow-xl">
+            <div className="animate-spin rounded-full h-8 w-8 border-t-2 border-b-2 border-indigo-500 mb-3"></div>
+            <p className="text-lg text-indigo-700 font-semibold">Loading ClassConnect...</p>
+        </div>
+    </div>
+);
+
+export default AuthProvider; // Added default export
