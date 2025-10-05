@@ -1,0 +1,374 @@
+import React, { useState, useMemo, useCallback } from 'react';
+import { motion, AnimatePresence } from 'framer-motion';
+// Icons from Lucide for a clean, modern look
+import { Search, ChevronDown, Download, BookOpen, Clock, X, Upload, ListFilter, RotateCw } from 'lucide-react';
+
+// --- 1. CONFIGURATION AND DUMMY DATA ---
+
+const BRANCHES = [
+    'All Branches', 'Computer Engineering', 'Information Technology', 
+    'Electronics & Telecommunication (EXTC)', 'Artificial Intelligence & Data Science (AIDS)'
+];
+const SEMESTERS = ['All Semesters', 1, 2, 3, 4, 5, 6, 7, 8];
+const PAPER_TYPES = ['All Types', 'Test 1', 'Test 2', 'End Sem'];
+
+// Sample Data Structure (UPDATED for Semester 3 CE subjects)
+const initialPapers = [
+    // --- Updated Semester 3 Papers (Computer Engineering) ---
+    { id: 1, branch: "Computer Engineering", semester: 3, subject: "Data Structures", paperType: "End Sem", year: 2023, link: "#" },
+    { id: 2, branch: "Computer Engineering", semester: 3, subject: "Digital Logic & Comp. Architecture (DLCA)", paperType: "Test 1", year: 2024, link: "#" },
+    { id: 3, branch: "Computer Engineering", semester: 3, subject: "Database Management Systems (DBMS)", paperType: "End Sem", year: 2024, link: "#" },
+    { id: 4, branch: "Computer Engineering", semester: 3, subject: "DSGT (Discrete Struct & Graph Theory)", paperType: "Test 2", year: 2023, link: "#" },
+    { id: 5, branch: "Computer Engineering", semester: 3, subject: "Engineering Mathematics III", paperType: "Test 1", year: 2022, link: "#" },
+    
+    // --- Retained Variety Papers for other Sems/Branches ---
+    { id: 6, branch: "Information Technology", semester: 4, subject: "Web Technology", paperType: "Test 2", year: 2023, link: "#" },
+    { id: 7, branch: "EXTC", semester: 5, subject: "Microprocessors", paperType: "End Sem", year: 2024, link: "#" },
+    { id: 8, branch: "AIDS", semester: 6, subject: "Machine Learning", paperType: "Test 1", year: 2024, link: "#" },
+];
+
+// --- 2. SUB-COMPONENTS ---
+
+// Custom Filter Dropdown
+const FilterDropdown = ({ label, options, value, onChange }) => (
+    <div className="relative flex-1 min-w-[150px]">
+        <label className="block text-xs font-medium text-gray-500 mb-1">{label}</label>
+        <div className="relative">
+            <select
+                className="w-full appearance-none bg-white border border-gray-300 rounded-lg py-2 px-3 pr-8 text-gray-700 leading-tight focus:outline-none focus:ring-2 focus:ring-indigo-500 cursor-pointer transition duration-150"
+                value={value}
+                onChange={(e) => onChange(e.target.value)}
+            >
+                {options.map((option, index) => (
+                    <option key={index} value={option}>
+                        {option}
+                    </option>
+                ))}
+            </select>
+            <ChevronDown className="absolute right-3 top-1/2 -translate-y-1/2 h-4 w-4 text-gray-400 pointer-events-none" />
+        </div>
+    </div>
+);
+
+// Paper Card Component
+const PaperCard = motion(function PaperCard({ paper }) {
+    const getPaperTypeStyle = (type) => {
+        switch (type) {
+            case 'Test 1': return 'bg-yellow-100 text-yellow-800';
+            case 'Test 2': return 'bg-orange-100 text-orange-800';
+            case 'End Sem': return 'bg-green-100 text-green-800';
+            default: return 'bg-gray-100 text-gray-800';
+        }
+    };
+
+    return (
+        <div className="bg-white rounded-xl shadow-lg border border-gray-100 p-5 flex flex-col h-full hover:shadow-xl transition-all duration-300">
+            <div className="flex-grow">
+                <span className={`inline-flex items-center px-3 py-1 text-xs font-medium rounded-full ${getPaperTypeStyle(paper.paperType)} mb-2`}>
+                    {paper.paperType}
+                </span>
+                <h3 className="text-xl font-bold text-gray-800 mb-2 line-clamp-2">{paper.subject}</h3>
+                <div className="space-y-1 text-sm text-gray-600">
+                    <p className="flex items-center"><BookOpen className="w-4 h-4 mr-2 text-indigo-500" /> Branch: {paper.branch}</p>
+                    <p className="flex items-center"><Clock className="w-4 h-4 mr-2 text-indigo-500" /> Year: {paper.year}</p>
+                    <p className="flex items-center"><ListFilter className="w-4 h-4 mr-2 text-indigo-500" /> Sem: {paper.semester}</p>
+                </div>
+            </div>
+            <div className="mt-4">
+                <a 
+                    href={paper.link} 
+                    target="_blank" 
+                    rel="noopener noreferrer" 
+                    className="flex items-center justify-center w-full bg-indigo-600 text-white font-semibold py-2 px-4 rounded-lg hover:bg-indigo-700 transition duration-300 transform hover:scale-[1.02] active:scale-95 shadow-md shadow-indigo-200"
+                >
+                    <Download className="w-5 h-5 mr-2" />
+                    Download/View
+                </a>
+            </div>
+        </div>
+    );
+});
+
+// Contribute Paper Modal
+const ContributeModal = ({ isOpen, onClose }) => {
+    if (!isOpen) return null;
+    return (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black bg-opacity-40 p-4" onClick={onClose}>
+            <motion.div 
+                initial={{ scale: 0.9, opacity: 0 }}
+                animate={{ scale: 1, opacity: 1 }}
+                exit={{ scale: 0.9, opacity: 0 }}
+                className="bg-white rounded-xl w-full max-w-lg p-6 shadow-2xl"
+                onClick={e => e.stopPropagation()} // Prevent closing when clicking inside modal
+            >
+                <div className="flex justify-between items-center border-b pb-3 mb-4">
+                    <h2 className="text-2xl font-bold text-indigo-700 flex items-center"><Upload className="w-6 h-6 mr-2"/> Contribute Paper</h2>
+                    <button onClick={onClose} className="text-gray-400 hover:text-gray-600 p-1 rounded-full hover:bg-gray-100 transition"><X /></button>
+                </div>
+                
+                <p className="text-gray-600 mb-4">Help your peers! Submit a scanned or digital copy of a previous year's paper.</p>
+                
+                <form className="space-y-4">
+                    <input type="text" placeholder="Subject Name (e.g., Data Structures)" className="w-full p-3 border border-gray-300 rounded-lg focus:ring-indigo-500 focus:border-indigo-500" required />
+                    <select className="w-full p-3 border border-gray-300 rounded-lg focus:ring-indigo-500 focus:border-indigo-500" required>
+                        <option value="">Select Branch</option>
+                        {BRANCHES.slice(1).map(b => <option key={b} value={b}>{b}</option>)}
+                    </select>
+                    <div className="flex space-x-4">
+                        <select className="flex-1 p-3 border border-gray-300 rounded-lg focus:ring-indigo-500 focus:border-indigo-500" required>
+                            <option value="">Select Sem</option>
+                            {SEMESTERS.slice(1).map(s => <option key={s} value={s}>{s}</option>)}
+                        </select>
+                        <select className="flex-1 p-3 border border-gray-300 rounded-lg focus:ring-indigo-500 focus:border-indigo-500" required>
+                            <option value="">Select Exam Type</option>
+                            {PAPER_TYPES.slice(1).map(t => <option key={t} value={t}>{t}</option>)}
+                        </select>
+                    </div>
+                    <input type="text" placeholder="Year (e.g., 2024)" className="w-full p-3 border border-gray-300 rounded-lg focus:ring-indigo-500 focus:border-indigo-500" required />
+                    <input type="url" placeholder="PDF or Drive Link" className="w-full p-3 border border-gray-300 rounded-lg focus:ring-indigo-500 focus:border-indigo-500" required />
+                    
+                    <motion.button 
+                        type="submit" 
+                        className="w-full bg-green-600 text-white font-bold py-3 rounded-lg hover:bg-green-700 transition duration-150 shadow-lg shadow-green-200"
+                        whileHover={{ scale: 1.02 }}
+                        whileTap={{ scale: 0.98 }}
+                    >
+                        Submit Paper for Review
+                    </motion.button>
+                </form>
+            </motion.div>
+        </div>
+    );
+};
+
+// --- 3. MAIN APP COMPONENT ---
+
+const App = () => {
+    const [papers] = useState(initialPapers);
+    const [filters, setFilters] = useState({
+        branch: BRANCHES[0],
+        semester: SEMESTERS[0],
+        subject: 'All Subjects',
+        paperType: PAPER_TYPES[0],
+    });
+    const [searchTerm, setSearchTerm] = useState('');
+    const [isContributeModalOpen, setIsContributeModalOpen] = useState(false);
+    const [sortBy, setSortBy] = useState('newest'); // 'newest' or 'oldest'
+
+    // Memoized function to get a list of unique subjects based on current branch/semester
+    const availableSubjects = useMemo(() => {
+        let subjects = papers.filter(paper => {
+            const branchMatch = filters.branch === BRANCHES[0] || paper.branch === filters.branch;
+            const semesterMatch = filters.semester === SEMESTERS[0] || paper.semester === parseInt(filters.semester);
+            return branchMatch && semesterMatch;
+        }).map(paper => paper.subject);
+        
+        return ['All Subjects', ...new Set(subjects)].sort();
+    }, [papers, filters.branch, filters.semester]);
+
+    // Effect to reset subject filter if current subject is no longer available
+    React.useEffect(() => {
+        if (!availableSubjects.includes(filters.subject)) {
+            setFilters(f => ({ ...f, subject: 'All Subjects' }));
+        }
+    }, [availableSubjects, filters.subject]);
+
+
+    // Core filtering logic (Memoized for performance)
+    const filteredAndSortedPapers = useMemo(() => {
+        let result = papers.filter(paper => {
+            const branchMatch = filters.branch === BRANCHES[0] || paper.branch === filters.branch;
+            const semesterMatch = filters.semester === SEMESTERS[0] || paper.semester === parseInt(filters.semester);
+            const subjectMatch = filters.subject === 'All Subjects' || paper.subject === filters.subject;
+            const paperTypeMatch = filters.paperType === PAPER_TYPES[0] || paper.paperType === filters.paperType;
+
+            const searchMatch = paper.subject.toLowerCase().includes(searchTerm.toLowerCase());
+            
+            return branchMatch && semesterMatch && subjectMatch && paperTypeMatch && searchMatch;
+        });
+
+        // Sorting by year
+        result.sort((a, b) => {
+            if (sortBy === 'newest') return b.year - a.year;
+            if (sortBy === 'oldest') return a.year - b.year;
+            return 0;
+        });
+
+        return result;
+    }, [papers, filters, searchTerm, sortBy]);
+
+    // Handler for filter changes
+    const handleFilterChange = useCallback((key, value) => {
+        setFilters(prev => ({ ...prev, [key]: value }));
+    }, []);
+
+    // Handler to reset all filters
+    const resetFilters = () => {
+        setFilters({
+            branch: BRANCHES[0],
+            semester: SEMESTERS[0],
+            subject: 'All Subjects',
+            paperType: PAPER_TYPES[0],
+        });
+        setSearchTerm('');
+        setSortBy('newest');
+    };
+
+    return (
+        <div className="min-h-screen bg-gray-50 p-4 sm:p-8 font-['Inter']">
+            
+            {/* Main Content Container */}
+            <div className="w-full max-w-7xl mx-auto">
+                
+                {/* Header and Actions */}
+                <header className="mb-8 border-b border-indigo-100 pb-4">
+                    <h1 className="text-3xl sm:text-4xl font-extrabold text-indigo-700">
+                        Previous Papers Archive
+                    </h1>
+                    <p className="text-lg text-gray-500 mt-1">
+                        Access, view, and download question papers organized by branch and semester.
+                    </p>
+                    <div className="mt-4 flex flex-col sm:flex-row space-y-3 sm:space-y-0 sm:space-x-4">
+                        <motion.button 
+                            className="bg-indigo-600 text-white font-semibold py-2 px-5 rounded-lg shadow-md hover:bg-indigo-700 transition duration-200 flex items-center justify-center"
+                            onClick={() => setIsContributeModalOpen(true)}
+                            whileHover={{ scale: 1.02 }}
+                            whileTap={{ scale: 0.98 }}
+                        >
+                            <Upload className="w-5 h-5 mr-2" />
+                            Contribute Paper
+                        </motion.button>
+                        
+                        {filteredAndSortedPapers.length > 0 && (
+                            <motion.a
+                                href="#" // In a real app, this would trigger a batch download utility
+                                className="bg-green-600 text-white font-semibold py-2 px-5 rounded-lg shadow-md hover:bg-green-700 transition duration-200 flex items-center justify-center"
+                                whileHover={{ scale: 1.02 }}
+                                whileTap={{ scale: 0.98 }}
+                            >
+                                <Download className="w-5 h-5 mr-2" />
+                                Download All ({filteredAndSortedPapers.length})
+                            </motion.a>
+                        )}
+
+                        <motion.button 
+                            className="bg-gray-200 text-gray-700 font-semibold py-2 px-5 rounded-lg shadow-sm hover:bg-gray-300 transition duration-200 flex items-center justify-center"
+                            onClick={resetFilters}
+                            whileHover={{ scale: 1.02 }}
+                            whileTap={{ scale: 0.98 }}
+                        >
+                            <RotateCw className="w-4 h-4 mr-2" />
+                            Reset Filters
+                        </motion.button>
+                    </div>
+                </header>
+
+                {/* Filter and Search Bar */}
+                <motion.div 
+                    initial={{ y: 20, opacity: 0 }}
+                    animate={{ y: 0, opacity: 1 }}
+                    transition={{ duration: 0.5 }}
+                    className="bg-white p-5 rounded-xl shadow-lg mb-8"
+                >
+                    <div className="flex flex-col sm:flex-row space-y-4 sm:space-y-0 sm:space-x-4 mb-4">
+                        <FilterDropdown
+                            label="Branch"
+                            options={BRANCHES}
+                            value={filters.branch}
+                            onChange={(val) => handleFilterChange('branch', val)}
+                        />
+                        <FilterDropdown
+                            label="Semester"
+                            options={SEMESTERS}
+                            value={filters.semester}
+                            onChange={(val) => handleFilterChange('semester', val)}
+                        />
+                        <FilterDropdown
+                            label="Subject"
+                            options={availableSubjects}
+                            value={filters.subject}
+                            onChange={(val) => handleFilterChange('subject', val)}
+                        />
+                        <FilterDropdown
+                            label="Paper Type"
+                            options={PAPER_TYPES}
+                            value={filters.paperType}
+                            onChange={(val) => handleFilterChange('paperType', val)}
+                        />
+                    </div>
+                    
+                    <div className="flex flex-col sm:flex-row space-y-4 sm:space-y-0 sm:space-x-4 pt-4 border-t border-gray-100">
+                        {/* Search Bar */}
+                        <div className="relative flex-1">
+                            <label className="block text-xs font-medium text-gray-500 mb-1">Search Subject</label>
+                            <Search className="absolute left-3 top-1/2 -translate-y-[2px] h-5 w-5 text-gray-400 pointer-events-none" />
+                            <input
+                                type="text"
+                                placeholder="Search by subject name..."
+                                value={searchTerm}
+                                onChange={(e) => setSearchTerm(e.target.value)}
+                                className="w-full pl-10 pr-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500 transition duration-150"
+                            />
+                        </div>
+
+                        {/* Sort Dropdown */}
+                        <div className="relative w-full sm:w-auto">
+                            <label className="block text-xs font-medium text-gray-500 mb-1">Sort By</label>
+                            <div className="relative">
+                                <select
+                                    className="w-full appearance-none bg-white border border-gray-300 rounded-lg py-2 px-3 pr-8 text-gray-700 leading-tight focus:outline-none focus:ring-2 focus:ring-indigo-500 cursor-pointer transition duration-150"
+                                    value={sortBy}
+                                    onChange={(e) => setSortBy(e.target.value)}
+                                >
+                                    <option value="newest">Newest Year First</option>
+                                    <option value="oldest">Oldest Year First</option>
+                                </select>
+                                <ChevronDown className="absolute right-3 top-1/2 -translate-y-1/2 h-4 w-4 text-gray-400 pointer-events-none" />
+                            </div>
+                        </div>
+                    </div>
+                </motion.div>
+
+
+                {/* Papers Grid */}
+                <div className="min-h-[400px]">
+                    {filteredAndSortedPapers.length > 0 ? (
+                        <motion.div 
+                            layout
+                            className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-6"
+                        >
+                            <AnimatePresence>
+                                {filteredAndSortedPapers.map((paper) => (
+                                    <PaperCard
+                                        key={paper.id}
+                                        paper={paper}
+                                        initial={{ opacity: 0, y: 20 }}
+                                        animate={{ opacity: 1, y: 0 }}
+                                        exit={{ opacity: 0, scale: 0.8 }}
+                                        layout
+                                        transition={{ duration: 0.3 }}
+                                    />
+                                ))}
+                            </AnimatePresence>
+                        </motion.div>
+                    ) : (
+                        <div className="text-center p-12 bg-white rounded-xl shadow-lg mt-10">
+                            <p className="text-2xl font-semibold text-gray-700">No Papers Found</p>
+                            <p className="text-gray-500 mt-2">
+                                We couldn't find any papers matching your current filters. 
+                                Try broadening your search or contribution to the archive!
+                            </p>
+                        </div>
+                    )}
+                </div>
+            </div>
+
+            {/* Modal Portal */}
+            <AnimatePresence>
+                {isContributeModalOpen && <ContributeModal isOpen={isContributeModalOpen} onClose={() => setIsContributeModalOpen(false)} />}
+            </AnimatePresence>
+        </div>
+    );
+};
+
+export default App;
