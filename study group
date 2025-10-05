@@ -1,0 +1,740 @@
+import React, { useState, useEffect, useMemo, useCallback } from 'react';
+import { motion, AnimatePresence } from 'framer-motion';
+import { initializeApp } from 'firebase/app';
+import { getFirestore, collection, onSnapshot, query, orderBy, doc, addDoc, updateDoc, serverTimestamp } from 'firebase/firestore';
+import { getStorage, ref, uploadBytes, getDownloadURL } from 'firebase/storage';
+import { Search, Send, Image, BookOpen, Clock, X, Filter, Users, MessageSquare } from 'lucide-react';
+
+// --- Global Config and Utilities ---
+
+// Mandatory environment variables (Assumed to be defined in the runtime environment)
+const appId = typeof __app_id !== 'undefined' ? __app_id : 'default-app-id';
+const firebaseConfig = typeof __firebase_config !== 'undefined' ? JSON.parse(__firebase_config) : null;
+
+// Branch and Semester Data
+const BRANCHES = ['Computer Engineering', 'Information Technology', 'Electronics & Telecommunication (EXTC)', 'Artificial Intelligence & Data Science (AIDS)'];
+const ALL_SEMESTERS = [1, 2, 3, 4, 5, 6, 7, 8];
+const SUBJECTS_BY_SEM = {
+    3: ["Data Structures", "DBMS", "DLCA", "DSGT", "Math"],
+    // Add other semesters subjects here as needed
+    // Example: 4: ["OS", "OOP", "COA"]
+};
+
+// Time formatting utility
+const timeAgo = (timestamp) => {
+    if (!timestamp?.seconds) return 'just now';
+    const seconds = Math.floor((new Date() - timestamp.toDate()) / 1000);
+    let interval = seconds / 31536000;
+    if (interval > 1) return Math.floor(interval) + " years ago";
+    interval = seconds / 2592000;
+    if (interval > 1) return Math.floor(interval) + " months ago";
+    interval = seconds / 86400;
+    if (interval > 1) return Math.floor(interval) + " days ago";
+    interval = seconds / 3600;
+    if (interval > 1) return Math.floor(interval) + " hours ago";
+    interval = seconds / 60;
+    if (interval > 1) return Math.floor(interval) + " minutes ago";
+    return Math.floor(seconds) + " seconds ago";
+};
+
+// --- Firebase Initialization and Hooks ---
+
+// Placeholder for the useAuth hook (must be defined in AuthContext.jsx)
+const useAuth = () => {
+    // Mock user for isolated testing if AuthContext isn't available
+    const auth = {
+        user: { uid: 'user-mock-12345', displayName: 'Mock Student' },
+        loading: false,
+        userId: 'user-mock-12345',
+        logout: () => console.log("Mock Logout"),
+        isAuthenticated: true,
+    };
+    // If you have imported the actual AuthContext:
+    // try { return useContext(AuthContext); } catch { return auth; }
+    return auth;
+};
+
+let db = null;
+let storage = null;
+
+if (firebaseConfig) {
+    const app = initializeApp(firebaseConfig);
+    db = getFirestore(app);
+    storage = getStorage(app);
+} else {
+    console.warn("Firebase is not configured. Data will not persist.");
+}
+
+// Firestore path for public, collaborative data
+const getCollectionRef = () => {
+    if (!db) return null;
+    return collection(db, `artifacts/${appId}/public/data/study_group_posts`);
+};
+
+// --- UI Components ---
+
+// 1. Solution Form Component
+const SolutionForm = ({ doubtId, onSubmitted }) => {
+    const { user, userId } = useAuth();
+    const [solutionText, setSolutionText] = useState('');
+    const [solutionImage, setSolutionImage] = useState(null);
+    const [previewUrl, setPreviewUrl] = useState('');
+    const [isUploading, setIsUploading] = useState(false);
+
+    const handleImageChange = (e) => {
+        const file = e.target.files[0];
+        if (file) {
+            setSolutionImage(file);
+            setPreviewUrl(URL.createObjectURL(file));
+        } else {
+            setSolutionImage(null);
+            setPreviewUrl('');
+        }
+    };
+
+    const uploadSolutionImage = async (file) => {
+        if (!storage || !file) return null;
+        const storageRef = ref(storage, `study_group_solutions/${userId}/${Date.now()}_${file.name}`);
+        const snapshot = await uploadBytes(storageRef, file);
+        return await getDownloadURL(snapshot.ref);
+    };
+
+    const handleSubmitSolution = async (e) => {
+        e.preventDefault();
+        if (!db || !userId || (!solutionText.trim() && !solutionImage)) return;
+
+        setIsUploading(true);
+        let imageUrl = '';
+        
+        try {
+            if (solutionImage) {
+                imageUrl = await uploadSolutionImage(solutionImage);
+            }
+
+            const doubtRef = doc(db, `artifacts/${appId}/public/data/study_group_posts/${doubtId}`);
+            
+            const solutionData = {
+                authorId: userId,
+                authorName: user?.displayName || 'Anonymous Contributor',
+                text: solutionText.trim(),
+                imageUrl: imageUrl,
+                timestamp: serverTimestamp(),
+                upvotes: 0,
+            };
+
+            // Use the arrayUnion pattern in a real app, but for simplicity here, 
+            // we will fetch the document and update the solutions array (less scalable but simpler for demo)
+            const solutionsRef = collection(doubtRef, 'solutions');
+            await addDoc(solutionsRef, solutionData);
+
+            setSolutionText('');
+            setSolutionImage(null);
+            setPreviewUrl('');
+            onSubmitted();
+            
+        } catch (error) {
+            console.error("Error submitting solution:", error);
+        } finally {
+            setIsUploading(false);
+        }
+    };
+
+    return (
+        <form onSubmit={handleSubmitSolution} className="mt-4 p-4 bg-indigo-50/50 border border-indigo-100 rounded-lg">
+            <h4 className="text-md font-semibold text-indigo-700 mb-3">Post Your Solution</h4>
+            <textarea
+                value={solutionText}
+                onChange={(e) => setSolutionText(e.target.value)}
+                placeholder="Type your explanation here..."
+                className="w-full p-2 border border-gray-300 rounded-lg focus:ring-indigo-500 focus:border-indigo-500 resize-none mb-2 text-sm"
+                rows="2"
+            />
+            
+            <div className="flex items-center justify-between">
+                <label className="flex items-center space-x-2 text-sm cursor-pointer text-gray-600 hover:text-indigo-600 transition">
+                    <input 
+                        type="file" 
+                        accept="image/*" 
+                        className="hidden" 
+                        onChange={handleImageChange} 
+                        disabled={isUploading}
+                    />
+                    <Image className="w-4 h-4" />
+                    <span>{solutionImage ? 'Image Selected' : 'Upload Image'}</span>
+                </label>
+                
+                <motion.button 
+                    type="submit" 
+                    className={`flex items-center bg-indigo-600 text-white py-1 px-3 rounded-full text-sm font-medium transition ${isUploading ? 'opacity-50 cursor-not-allowed' : 'hover:bg-indigo-700'}`}
+                    whileHover={{ scale: isUploading ? 1 : 1.05 }}
+                    whileTap={{ scale: isUploading ? 1 : 0.95 }}
+                    disabled={isUploading || (!solutionText.trim() && !solutionImage)}
+                >
+                    {isUploading ? 'Posting...' : 'Post Solution'}
+                    <Send className="w-3 h-3 ml-1" />
+                </motion.button>
+            </div>
+            {previewUrl && (
+                <div className="mt-2 relative w-20 h-20">
+                    <img src={previewUrl} alt="Solution Preview" className="w-full h-full object-cover rounded-md border border-gray-200" />
+                    <button type="button" onClick={() => { setSolutionImage(null); setPreviewUrl(''); }} className="absolute -top-1 -right-1 bg-red-500 rounded-full p-0.5 text-white"><X className="w-3 h-3" /></button>
+                </div>
+            )}
+        </form>
+    );
+};
+
+
+// 2. Doubt Card Component
+const DoubtCard = ({ doubt }) => {
+    const { user, userId } = useAuth();
+    const [isSolutionsOpen, setIsSolutionsOpen] = useState(false);
+    const [isSolutionFormOpen, setIsSolutionFormOpen] = useState(false);
+    const [solutions, setSolutions] = useState([]);
+
+    // Fetch solutions in real-time
+    useEffect(() => {
+        if (!db) return;
+
+        const solutionsRef = collection(db, `artifacts/${appId}/public/data/study_group_posts/${doubt.id}/solutions`);
+        const q = query(solutionsRef, orderBy('timestamp', 'asc'));
+
+        const unsubscribe = onSnapshot(q, (snapshot) => {
+            const fetchedSolutions = snapshot.docs.map(doc => ({
+                id: doc.id,
+                ...doc.data(),
+            }));
+            setSolutions(fetchedSolutions);
+        }, (error) => {
+            console.error("Error fetching solutions:", error);
+        });
+
+        return () => unsubscribe();
+    }, [doubt.id]);
+
+    const handleMarkSolved = async () => {
+        if (!db || doubt.authorId !== userId) return;
+        const doubtRef = doc(db, `artifacts/${appId}/public/data/study_group_posts/${doubt.id}`);
+        try {
+            await updateDoc(doubtRef, { isSolved: !doubt.isSolved });
+        } catch (error) {
+            console.error("Error marking as solved:", error);
+        }
+    };
+
+    return (
+        <motion.div 
+            className={`bg-white rounded-xl shadow-lg p-5 border transition-all duration-300 ${doubt.isSolved ? 'border-green-300 bg-green-50' : 'border-indigo-100'}`}
+        >
+            <div className="flex justify-between items-start mb-3">
+                <div className="flex items-center space-x-3">
+                    <Users className="w-5 h-5 text-indigo-600" />
+                    <div>
+                        <p className="text-sm font-semibold text-gray-800">{doubt.authorName}</p>
+                        <p className="text-xs text-gray-500">{doubt.branch} • Sem {doubt.semester}</p>
+                    </div>
+                </div>
+                <div className="text-right">
+                    <p className="text-sm font-bold text-indigo-700">{doubt.subject}</p>
+                    <p className="text-xs text-gray-400 flex items-center mt-1">
+                        <Clock className="w-3 h-3 mr-1" /> 
+                        {timeAgo(doubt.timestamp)}
+                    </p>
+                </div>
+            </div>
+
+            <h3 className="text-xl font-bold text-gray-900 mb-2">{doubt.description}</h3>
+            
+            {doubt.imageUrl && (
+                <a href={doubt.imageUrl} target="_blank" rel="noopener noreferrer">
+                    <img 
+                        src={doubt.imageUrl} 
+                        alt="Doubt attachment" 
+                        className="w-full max-h-60 object-contain rounded-lg border border-gray-200 mt-3 mb-4 cursor-pointer hover:shadow-md transition"
+                    />
+                </a>
+            )}
+
+            {/* Solved Status */}
+            {doubt.isSolved && (
+                <div className="flex items-center text-green-700 font-semibold text-sm my-3 p-2 bg-green-100 rounded-lg">
+                    <CheckCircle className="w-4 h-4 mr-2" /> 
+                    This doubt has been marked as solved!
+                </div>
+            )}
+
+
+            <div className="flex justify-between items-center border-t border-gray-100 pt-3 mt-3">
+                {/* Solutions Toggle */}
+                <motion.button 
+                    onClick={() => setIsSolutionsOpen(!isSolutionsOpen)}
+                    className="flex items-center text-sm font-medium text-indigo-600 hover:text-indigo-800 transition"
+                    whileTap={{ scale: 0.98 }}
+                >
+                    <MessageSquare className="w-4 h-4 mr-1" />
+                    {solutions.length} Solutions 
+                    <ChevronDown className={`w-4 h-4 ml-1 transform transition-transform duration-300 ${isSolutionsOpen ? 'rotate-180' : 'rotate-0'}`} />
+                </motion.button>
+
+                <div className="flex items-center space-x-3">
+                    {/* Mark Solved Checkbox */}
+                    {doubt.authorId === userId && (
+                        <label className="flex items-center text-sm text-gray-600">
+                            <input 
+                                type="checkbox" 
+                                checked={doubt.isSolved || false}
+                                onChange={handleMarkSolved}
+                                className="mr-1 text-green-600 rounded focus:ring-green-500"
+                            />
+                            Mark Solved
+                        </label>
+                    )}
+                    
+                    {/* Add Solution Button */}
+                    <motion.button 
+                        onClick={() => setIsSolutionFormOpen(!isSolutionFormOpen)}
+                        className="text-sm font-medium text-indigo-600 bg-indigo-50 py-1 px-3 rounded-full hover:bg-indigo-100 transition"
+                        whileTap={{ scale: 0.95 }}
+                    >
+                        {isSolutionFormOpen ? 'Cancel' : 'Add Solution'}
+                    </motion.button>
+                </div>
+            </div>
+
+            {/* Nested Solution Form */}
+            <AnimatePresence>
+                {isSolutionFormOpen && (
+                    <motion.div 
+                        initial={{ opacity: 0, height: 0 }}
+                        animate={{ opacity: 1, height: 'auto' }}
+                        exit={{ opacity: 0, height: 0 }}
+                        transition={{ duration: 0.3 }}
+                        style={{ overflow: 'hidden' }}
+                    >
+                        <SolutionForm doubtId={doubt.id} onSubmitted={() => setIsSolutionFormOpen(false)} />
+                    </motion.div>
+                )}
+            </AnimatePresence>
+
+
+            {/* Nested Solutions List */}
+            <AnimatePresence>
+                {isSolutionsOpen && (
+                    <motion.div 
+                        initial={{ opacity: 0, height: 0 }}
+                        animate={{ opacity: 1, height: 'auto' }}
+                        exit={{ opacity: 0, height: 0 }}
+                        transition={{ duration: 0.3 }}
+                        style={{ overflow: 'hidden' }}
+                        className="mt-4 space-y-3 p-3 bg-gray-50 rounded-lg border border-gray-200"
+                    >
+                        {solutions.length > 0 ? (
+                            solutions.map(solution => (
+                                <div key={solution.id} className="bg-white p-3 rounded-lg shadow-sm border border-gray-100">
+                                    <div className="flex justify-between items-start text-xs text-gray-500 mb-2 border-b pb-1 border-gray-50">
+                                        <p className="font-semibold text-gray-700">Answer by: {solution.authorName}</p>
+                                        <p className="flex items-center">
+                                            <Clock className="w-3 h-3 mr-1" />
+                                            {timeAgo(solution.timestamp)}
+                                        </p>
+                                    </div>
+                                    {solution.text && <p className="text-sm text-gray-700">{solution.text}</p>}
+                                    {solution.imageUrl && (
+                                        <a href={solution.imageUrl} target="_blank" rel="noopener noreferrer">
+                                            <img src={solution.imageUrl} alt="Solution attachment" className="mt-2 w-32 object-contain rounded-md cursor-pointer hover:shadow-md transition" />
+                                        </a>
+                                    )}
+                                </div>
+                            ))
+                        ) : (
+                            <p className="text-sm text-gray-500 text-center py-2">No solutions posted yet. Be the first!</p>
+                        )}
+                    </motion.div>
+                )}
+            </AnimatePresence>
+
+        </motion.div>
+    );
+};
+
+// 3. Doubt Submission Form
+const DoubtForm = ({ onSubmitted }) => {
+    const { user, userId } = useAuth();
+    const [name, setName] = useState(user?.displayName || 'Anonymous');
+    const [semester, setSemester] = useState(ALL_SEMESTERS[0]);
+    const [subject, setSubject] = useState('');
+    const [description, setDescription] = useState('');
+    const [imageFile, setImageFile] = useState(null);
+    const [previewUrl, setPreviewUrl] = useState('');
+    const [branch, setBranch] = useState(BRANCHES[0]);
+    const [isSubmitting, setIsSubmitting] = useState(false);
+    const [submitError, setSubmitError] = useState(''); // New state for error messages
+
+    const handleImageChange = (e) => {
+        const file = e.target.files[0];
+        if (file) {
+            setImageFile(file);
+            setPreviewUrl(URL.createObjectURL(file));
+        } else {
+            setImageFile(null);
+            setPreviewUrl('');
+        }
+    };
+
+    const uploadDoubtImage = async (file) => {
+        if (!storage || !file) return null;
+        const storageRef = ref(storage, `study_group_doubts/${userId}/${Date.now()}_${file.name}`);
+        const snapshot = await uploadBytes(storageRef, file);
+        return await getDownloadURL(snapshot.ref);
+    };
+
+    const handleSubmit = async (e) => {
+        e.preventDefault();
+        setSubmitError(''); // Clear previous errors
+        
+        if (!userId) {
+            setSubmitError("Authentication Error: You must be logged in to post a doubt.");
+            return;
+        }
+
+        if (!db) {
+            setSubmitError("System Error: Firebase is not initialized. Cannot connect to the database.");
+            return;
+        }
+
+        if (!description.trim() || !subject.trim() || !branch.trim()) {
+            setSubmitError("Validation Error: Please fill out all required fields (Description, Subject, and Branch).");
+            return;
+        }
+
+        setIsSubmitting(true);
+        let imageUrl = '';
+
+        try {
+            if (imageFile) {
+                // Image upload could fail here due to Storage rules
+                imageUrl = await uploadDoubtImage(imageFile);
+            }
+
+            const postData = {
+                authorId: userId,
+                authorName: name || 'Anonymous',
+                branch: branch,
+                semester: parseInt(semester),
+                subject: subject,
+                description: description.trim(),
+                imageUrl: imageUrl,
+                timestamp: serverTimestamp(),
+                isSolved: false,
+            };
+
+            const collectionRef = getCollectionRef();
+            // Firestore document creation could fail here due to Firestore rules
+            await addDoc(collectionRef, postData);
+
+            // Reset form
+            setDescription('');
+            setImageFile(null);
+            setPreviewUrl('');
+            setSubmitError('');
+            onSubmitted(); // Close the form or show a success message
+
+        } catch (error) {
+            console.error("Error submitting doubt:", error);
+            // Display a user-friendly message for submission failure
+            setSubmitError(`Submission failed. Check your browser console for details. (Likely a Firebase security rule error: ${error.code})`);
+        } finally {
+            setIsSubmitting(false);
+        }
+    };
+    
+    // Dynamic subjects based on selected semester
+    const availableSubjects = useMemo(() => {
+        return SUBJECTS_BY_SEM[semester] || [];
+    }, [semester]);
+
+    return (
+        <motion.div 
+            initial={{ opacity: 0, y: -20 }}
+            animate={{ opacity: 1, y: 0 }}
+            exit={{ opacity: 0, y: -20 }}
+            className="bg-white p-6 rounded-xl shadow-2xl border border-indigo-100 mb-8"
+        >
+            <h2 className="text-2xl font-bold text-indigo-700 mb-4 flex items-center">
+                <Send className="w-6 h-6 mr-2" /> Post a New Doubt
+            </h2>
+            <form onSubmit={handleSubmit} className="space-y-4">
+                <input
+                    type="text"
+                    value={name}
+                    onChange={(e) => setName(e.target.value)}
+                    placeholder="Your Name (e.g., John Doe)"
+                    className="w-full p-3 border border-gray-300 rounded-lg focus:ring-indigo-500 focus:border-indigo-500"
+                    required
+                />
+                <div className="grid grid-cols-2 sm:grid-cols-3 gap-4">
+                    <select
+                        value={branch}
+                        onChange={(e) => setBranch(e.target.value)}
+                        className="p-3 border border-gray-300 rounded-lg focus:ring-indigo-500 focus:border-indigo-500"
+                        required
+                    >
+                        <option value="" disabled>Select Branch</option>
+                        {BRANCHES.map(b => <option key={b} value={b}>{b}</option>)}
+                    </select>
+                    <select
+                        value={semester}
+                        onChange={(e) => setSemester(parseInt(e.target.value))}
+                        className="p-3 border border-gray-300 rounded-lg focus:ring-indigo-500 focus:border-indigo-500"
+                        required
+                    >
+                        <option value="" disabled>Select Sem</option>
+                        {ALL_SEMESTERS.map(s => <option key={s} value={s}>Sem {s}</option>)}
+                    </select>
+                    <select
+                        value={subject}
+                        onChange={(e) => setSubject(e.target.value)}
+                        className="p-3 border border-gray-300 rounded-lg focus:ring-indigo-500 focus:border-indigo-500"
+                        required
+                        disabled={!availableSubjects.length}
+                    >
+                        <option value="" disabled>Select Subject</option>
+                        {availableSubjects.map(s => <option key={s} value={s}>{s}</option>)}
+                        {!availableSubjects.length && <option disabled>Select Semester first</option>}
+                    </select>
+                </div>
+
+                <textarea
+                    value={description}
+                    onChange={(e) => setDescription(e.target.value)}
+                    placeholder="Describe your doubt in detail..."
+                    className="w-full p-3 border border-gray-300 rounded-lg focus:ring-indigo-500 focus:border-indigo-500 resize-none"
+                    rows="3"
+                    required
+                />
+                
+                {/* Error Message Display */}
+                {submitError && (
+                    <div className="bg-red-100 border border-red-400 text-red-700 px-4 py-3 rounded relative text-sm" role="alert">
+                        <strong className="font-bold">Submission Failed:</strong>
+                        <span className="block sm:inline ml-2">{submitError}</span>
+                    </div>
+                )}
+                
+                <div className="flex justify-between items-end">
+                    <label className="flex items-center space-x-2 text-sm cursor-pointer text-indigo-600 hover:text-indigo-800 transition">
+                        <input 
+                            type="file" 
+                            accept="image/*" 
+                            className="hidden" 
+                            onChange={handleImageChange}
+                            disabled={isSubmitting}
+                        />
+                        <Image className="w-5 h-5" />
+                        <span>{imageFile ? 'Image Selected' : 'Upload Image (Optional)'}</span>
+                    </label>
+
+                    <motion.button 
+                        type="submit" 
+                        className={`flex items-center bg-indigo-600 text-white font-bold py-3 px-6 rounded-lg shadow-lg ${isSubmitting ? 'opacity-50 cursor-not-allowed' : 'hover:bg-indigo-700'}`}
+                        whileHover={{ scale: isSubmitting ? 1 : 1.02 }}
+                        whileTap={{ scale: isSubmitting ? 1 : 0.98 }}
+                        disabled={isSubmitting || !description.trim() || !subject.trim()}
+                    >
+                        {isSubmitting ? 'Posting...' : 'Submit Doubt'}
+                        <Send className="w-4 h-4 ml-2" />
+                    </motion.button>
+                </div>
+                {previewUrl && (
+                    <div className="mt-2 relative w-32 h-32">
+                        <img src={previewUrl} alt="Doubt Preview" className="w-full h-full object-cover rounded-md border border-gray-200" />
+                        <button type="button" onClick={() => { setImageFile(null); setPreviewUrl(''); }} className="absolute -top-1 -right-1 bg-red-500 rounded-full p-1 text-white"><X className="w-4 h-4" /></button>
+                    </div>
+                )}
+            </form>
+        </motion.div>
+    );
+};
+
+// 4. Main App Component (StudyGroup)
+const StudyGroup = () => {
+    const [doubts, setDoubts] = useState([]);
+    const [isFormOpen, setIsFormOpen] = useState(true);
+    const [filters, setFilters] = useState({ semester: 'All', subject: 'All' });
+    const [searchTerm, setSearchTerm] = useState('');
+    const [fetchError, setFetchError] = useState(''); // Added state for fetch error
+
+    // --- Real-time Firestore Feed Hook ---
+    useEffect(() => {
+        if (!db) return;
+
+        setFetchError(''); // Clear previous error
+
+        const collectionRef = getCollectionRef();
+        const q = query(collectionRef, orderBy('timestamp', 'desc'));
+
+        const unsubscribe = onSnapshot(q, (snapshot) => {
+            const fetchedDoubts = snapshot.docs.map(doc => ({
+                id: doc.id,
+                ...doc.data(),
+            }));
+            setDoubts(fetchedDoubts);
+            setFetchError(''); // Clear error on successful fetch
+        }, (error) => {
+            console.error("Error fetching doubts:", error);
+            // Handle permission error specifically
+            if (error.code === 'permission-denied' || error.message.includes('insufficient permissions')) {
+                setFetchError("Permission Denied: The feed cannot load. This is likely due to restrictive Firebase Security Rules. Please ensure your Firestore rules allow authenticated users to READ from the 'study_group_posts' collection.");
+            } else {
+                setFetchError(`An unexpected error occurred: ${error.message}`);
+            }
+        });
+
+        return () => unsubscribe();
+    }, []);
+
+    // --- Filtering and Searching Logic ---
+    const filteredDoubts = useMemo(() => {
+        return doubts.filter(doubt => {
+            const semMatch = filters.semester === 'All' || doubt.semester === parseInt(filters.semester);
+            const subMatch = filters.subject === 'All' || doubt.subject === filters.subject;
+            const searchMatch = doubt.description.toLowerCase().includes(searchTerm.toLowerCase()) ||
+                                doubt.subject.toLowerCase().includes(searchTerm.toLowerCase()) ||
+                                doubt.authorName.toLowerCase().includes(searchTerm.toLowerCase());
+
+            return semMatch && subMatch && searchMatch;
+        });
+    }, [doubts, filters, searchTerm]);
+
+    // Get list of all subjects currently in the data
+    const allSubjectsInFeed = useMemo(() => {
+        const subjects = doubts.map(d => d.subject);
+        return ['All', ...new Set(subjects)].sort();
+    }, [doubts]);
+
+
+    return (
+        <div className="min-h-screen bg-gray-50 p-4 sm:p-8 font-['Inter']">
+            <div className="w-full max-w-5xl mx-auto">
+                
+                {/* Header */}
+                <header className="mb-6">
+                    <h1 className="text-4xl font-extrabold text-indigo-700 flex items-center">
+                        <Users className="w-8 h-8 mr-2" /> Study Group
+                    </h1>
+                    <p className="text-lg text-gray-500 mt-1">
+                        Post your doubts and help classmates with solutions. Real-time feed!
+                    </p>
+                </header>
+
+                {/* Post Toggle */}
+                <motion.button 
+                    onClick={() => setIsFormOpen(!isFormOpen)}
+                    className="w-full bg-indigo-500 text-white font-semibold py-3 rounded-lg shadow-md hover:bg-indigo-600 transition duration-200 flex items-center justify-center mb-6"
+                    whileHover={{ scale: 1.01 }}
+                    whileTap={{ scale: 0.99 }}
+                >
+                    {isFormOpen ? 'Hide Post Form' : 'I Have a Doubt! Post It Here'}
+                    <ChevronDown className={`w-5 h-5 ml-2 transform transition-transform ${isFormOpen ? 'rotate-180' : 'rotate-0'}`} />
+                </motion.button>
+                
+                {/* Doubt Submission Form (Conditionally rendered) */}
+                <AnimatePresence>
+                    {isFormOpen && <DoubtForm onSubmitted={() => setIsFormOpen(false)} />}
+                </AnimatePresence>
+
+                {/* Filters and Search */}
+                <div className="bg-white p-5 rounded-xl shadow-lg border border-gray-100 mb-8">
+                    <h3 className="text-lg font-semibold text-gray-700 mb-4 flex items-center"><Filter className="w-5 h-5 mr-2" /> Filter Doubts</h3>
+                    <div className="flex flex-col sm:flex-row space-y-4 sm:space-y-0 sm:space-x-4">
+                        {/* Semester Filter */}
+                        <div className="relative flex-1">
+                            <label className="block text-xs font-medium text-gray-500 mb-1">Semester</label>
+                            <select
+                                value={filters.semester}
+                                onChange={(e) => setFilters(f => ({ ...f, semester: e.target.value }))}
+                                className="w-full appearance-none bg-white border border-gray-300 rounded-lg py-2 px-3 pr-8 text-gray-700 leading-tight focus:outline-none focus:ring-2 focus:ring-indigo-500 cursor-pointer"
+                            >
+                                <option value="All">All Semesters</option>
+                                {ALL_SEMESTERS.map(s => <option key={s} value={s}>Sem {s}</option>)}
+                            </select>
+                            <ChevronDown className="absolute right-3 top-1/2 translate-y-2 h-4 w-4 text-gray-400 pointer-events-none" />
+                        </div>
+
+                        {/* Subject Filter */}
+                        <div className="relative flex-1">
+                            <label className="block text-xs font-medium text-gray-500 mb-1">Subject</label>
+                            <select
+                                value={filters.subject}
+                                onChange={(e) => setFilters(f => ({ ...f, subject: e.target.value }))}
+                                className="w-full appearance-none bg-white border border-gray-300 rounded-lg py-2 px-3 pr-8 text-gray-700 leading-tight focus:outline-none focus:ring-2 focus:ring-indigo-500 cursor-pointer"
+                            >
+                                <option value="All">All Subjects</option>
+                                {allSubjectsInFeed.map(s => <option key={s} value={s}>{s}</option>)}
+                            </select>
+                            <ChevronDown className="absolute right-3 top-1/2 translate-y-2 h-4 w-4 text-gray-400 pointer-events-none" />
+                        </div>
+                        
+                        {/* Search Bar */}
+                        <div className="relative sm:w-2/3">
+                            <label className="block text-xs font-medium text-gray-500 mb-1">Search Keywords</label>
+                            <Search className="absolute left-3 top-1/2 translate-y-[2px] h-5 w-5 text-gray-400 pointer-events-none" />
+                            <input
+                                type="text"
+                                placeholder="Search doubts by keyword..."
+                                value={searchTerm}
+                                onChange={(e) => setSearchTerm(e.target.value)}
+                                className="w-full pl-10 pr-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500 transition duration-150"
+                            />
+                        </div>
+                    </div>
+                </div>
+
+                {/* Doubts Feed */}
+                <h2 className="text-xl font-bold text-gray-800 mb-4">
+                    Active Doubts ({filteredDoubts.length})
+                </h2>
+                
+                {/* Fetch Error Message Display */}
+                {fetchError && (
+                    <div className="bg-red-100 border border-red-400 text-red-700 px-4 py-3 rounded relative text-sm mb-6" role="alert">
+                        <strong className="font-bold">Database Error:</strong>
+                        <span className="block sm:inline ml-2">{fetchError}</span>
+                    </div>
+                )}
+                
+                <div className="space-y-6">
+                    <AnimatePresence>
+                        {filteredDoubts.length > 0 ? (
+                            filteredDoubts.map(doubt => (
+                                <DoubtCard 
+                                    key={doubt.id} 
+                                    doubt={doubt}
+                                    // Framer Motion props for list animation
+                                    initial={{ opacity: 0, y: 50 }}
+                                    animate={{ opacity: 1, y: 0 }}
+                                    exit={{ opacity: 0, scale: 0.95 }}
+                                    transition={{ duration: 0.4 }}
+                                />
+                            ))
+                        ) : (
+                            <div className="text-center p-12 bg-white rounded-xl shadow-lg border border-gray-100 mt-10">
+                                <p className="text-2xl font-semibold text-gray-700">No Doubts Match Filters</p>
+                                <p className="text-gray-500 mt-2">
+                                    Try adjusting your filters or be the first to post a question!
+                                </p>
+                            </div>
+                        )}
+                    </AnimatePresence>
+                </div>
+            </div>
+        </div>
+    );
+};
+
+// Fix for Lucide icons not being available in the environment
+// We redefine them inline here to ensure the code is runnable without external libraries
+const CheckCircle = ({ className }) => <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className={className}><path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"/><path d="m9 11 3 3L22 4"/></svg>;
+const ChevronDown = ({ className }) => <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className={className}><path d="m6 9 6 6 6-6"/></svg>;
+
+export default StudyGroup;
